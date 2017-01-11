@@ -1,0 +1,93 @@
+---
+- name: initialize docker
+  hosts: localhost
+  connection: local
+
+  tasks:
+    - name: set ansible_python_interpreter
+      set_fact: ansible_python_interpreter="/usr/bin/python2"
+
+    - name: bring up container
+      docker_container:
+        name: ansible-archiso-zfs
+        image: pritunl/archlinux:latest
+        detach: yes
+        tty: yes
+        privileged: yes
+        command: sleep infinity
+        state: started
+
+    - name: register new container hostname
+      add_host: name=ansible-archiso-zfs
+
+- name: run tasks in container
+  hosts: ansible-archiso-zfs
+  connection: docker
+  gather_facts: no
+
+  tasks:
+    - name: install base-devel and python2
+      raw: pacman -S --noconfirm base-devel python2
+
+    - name: set ansible_python_interpreter
+      set_fact: ansible_python_interpreter="/usr/bin/python2"
+
+    - name: install archiso
+      pacman:
+        name: archiso
+        state: present
+        update_cache: yes
+
+    - name: copy releng profile
+      command: cp -r /usr/share/archiso/configs/releng /tmp/releng creates=/tmp/releng
+
+    - name: remove default mirrorlist
+      file: path=/etc/pacman.d/mirrorlist state=absent
+
+    - name: insert mirrorlist
+      blockinfile:
+        dest: /etc/pacman.d/mirrorlist
+        create: yes
+        block: |
+          Server = https://archlinux.surlyjake.com/archlinux/$repo/os/$arch
+          Server = http://mirrors.evowise.com/archlinux/$repo/os/$arch
+          Server = http://mirror.rackspace.com/archlinux/$repo/os/$arch
+
+    - name: insert ZoL packages
+      blockinfile:
+        dest: /tmp/releng/packages.x86_64
+        block: |
+          spl-utils-linux-git
+          spl-linux-git
+          zfs-utils-linux-git
+          zfs-linux-git
+
+    - name: insert archzfs repository
+      blockinfile:
+        dest: /tmp/releng/pacman.conf
+        block: |
+          [archzfs]
+          SigLevel = Never
+          Server = http://archzfs.com/$repo/x86_64
+
+    - name: build custom live iso
+      command: /tmp/releng/build.sh -v chdir=/tmp/releng creates=/tmp/releng/out/archlinux-*.iso
+
+    - name: fetch custom live iso from container
+      fetch:
+        src: /tmp/releng/out/archlinux-*.iso
+        dest: .
+        fail_on_missing: yes
+        flat: yes
+
+- name: finalize docker
+  hosts: localhost
+
+  tasks:
+    - name: set ansible_python_interpreter
+      set_fact: ansible_python_interpreter="/usr/bin/python2"
+
+    - name: remove container
+      docker_container:
+        name: ansible-archiso-zfs
+        state: absent
