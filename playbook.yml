@@ -73,15 +73,21 @@
     - name: build custom live iso
       command: /tmp/releng/build.sh -v chdir=/tmp/releng creates=/tmp/releng/out/archlinux-*.iso
 
+    - name: retrieve custom live iso filename
+      shell: (cd /tmp/releng/out; find . -type f -name 'archlinux-*.iso') | cut -d '/' -f 2
+      register: files_to_copy
+
     - name: fetch custom live iso from container
       fetch:
-        src: /tmp/releng/out/archlinux-*.iso
-        dest: .
+        src: /tmp/releng/out/{{ item }}
+        dest: ./{{ item }}
         fail_on_missing: yes
         flat: yes
+      with_items: "{{ files_to_copy.stdout_lines }}"
 
 - name: finalize docker
   hosts: localhost
+  connection: local
 
   tasks:
     - name: set ansible_python_interpreter
